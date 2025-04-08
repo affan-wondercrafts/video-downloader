@@ -46,7 +46,7 @@ export async function downloadVideo(url: string): Promise<void> {
 	spinner.succeed(`✅ Formats fetched in ${seconds}s`);
 
 	const info = JSON.parse(formatsJson);
-	console.log('Video Info:=================>>>>>', info);
+	// console.log('Video Info:=================>>>>>', info);
 	const videoTitle = info.title.replace(/[\/\\:*?"<>|]/g, '');
 
 	// Popular video formats
