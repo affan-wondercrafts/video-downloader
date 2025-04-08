@@ -1,25 +1,18 @@
-import { downloadVideo } from './downloaders/downloader';
+import { downloadVideo } from './downloaders/downloader.js';
 
-// Example usage
 async function main() {
-  const url = process.argv[2];
-  const format = process.argv[3] || 'mp4';
-  const quality = process.argv[4] || '720p';
-  
-  if (!url) {
-    console.error('Please provide a social media URL as an argument');
-    process.exit(1);
-  }
+	const url = process.argv[2];
 
-  try {
-    console.log(`Downloading video from: ${url}`);
-    console.log(`Format: ${format}, Quality: ${quality}`);
-    
-    const outputPath = await downloadVideo(url, format, quality);
-    console.log(`Video downloaded successfully: ${outputPath}`);
-  } catch (error) {
-    console.error('Error downloading video:', error);
-  }
+	if (!url) {
+		console.error('❗ Please provide a video URL.');
+		process.exit(1);
+	}
+
+	try {
+		await downloadVideo(url);
+	} catch (error) {
+		console.error('❌ Error:', error);
+	}
 }
 
 main();

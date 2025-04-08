@@ -1,157 +1,163 @@
-import axios from 'axios';
-import * as cheerio from 'cheerio';
-import youtubeDl from 'youtube-dl-exec';
+import { spawn } from 'child_process';
+import inquirer from 'inquirer';
 import * as fs from 'fs-extra';
 import * as path from 'path';
-import { processVideo } from '../utils/ffmpeg-processor';
-import { getSocialMediaType } from '../utils/url-parser';
+import ora from 'ora';
 
-export async function downloadVideo(
-	url: string,
-	format: string = 'mp4',
-	quality: string = '720p',
-): Promise<string> {
-	// Identify the social media platform from the URL
-	const platform = getSocialMediaType(url);
+const TARGET_RESOLUTIONS = [2160, 1440, 1080, 720, 480, 360, 240, 144];
 
-	// Create downloads directory if it doesn't exist
+function formatSize(format: any) {
+	const size = format.filesize || format.filesize_approx;
+	return size ? `${(size / 1024 / 1024).toFixed(2)} MB` : 'Size N/A';
+}
+
+export async function downloadVideo(url: string): Promise<void> {
+	if (url.includes('tiktok.com')) {
+		url = url.split('?')[0];
+	}
 	const downloadsDir = path.join(process.cwd(), 'downloads');
 	await fs.ensureDir(downloadsDir);
 
-	// Generate a filename based on current timestamp
-	const timestamp = new Date().getTime();
-	const tempFilePath = path.join(downloadsDir, `temp_${timestamp}.mp4`);
-	const outputFilePath = path.join(
-		downloadsDir,
-		`video_${timestamp}.${format}`,
+	// Spinner and timer
+	const spinner = ora('🔍 Fetching video formats...').start();
+	const startTime = Date.now();
+
+	let formatsJson: string;
+
+	try {
+		formatsJson = await new Promise<string>((resolve, reject) => {
+			const proc = spawn('yt-dlp', ['-J', url]);
+
+			let data = '';
+			proc.stdout.on('data', (chunk) => (data += chunk.toString()));
+			proc.stderr.on('data', (err) => console.error(err.toString()));
+			proc.on('close', (code) => {
+				if (code === 0) resolve(data);
+				else reject('❌ Failed to fetch formats');
+			});
+		});
+	} catch (err) {
+		spinner.fail(err as string);
+		return;
+	}
+
+	const endTime = Date.now();
+	const seconds = ((endTime - startTime) / 1000).toFixed(2);
+	spinner.succeed(`✅ Formats fetched in ${seconds}s`);
+
+	const info = JSON.parse(formatsJson);
+	console.log('Video Info:=================>>>>>', info);
+	const videoTitle = info.title.replace(/[\/\\:*?"<>|]/g, '');
+
+	// Popular video formats
+	const videoFormatMap: { [height: number]: any } = {};
+
+	for (const res of TARGET_RESOLUTIONS) {
+		const preferred = info.formats
+			.filter((f: any) => f.filesize && f.ext && f.format_id)
+			.find(
+				(f: any) =>
+					f.height === res &&
+					(f.ext === 'mp4' || f.ext === 'webm') &&
+					f.vcodec !== 'none',
+			);
+
+		const fallback = info.formats
+			.filter((f: any) => f.filesize && f.ext && f.format_id)
+			.find((f: any) => f.vcodec !== 'none');
+
+		if (preferred) {
+			videoFormatMap[res] = preferred;
+		} else if (fallback) {
+			videoFormatMap[fallback.height] = fallback;
+		}
+	}
+
+	const videoChoices = Object.values(videoFormatMap).map((f: any) => ({
+		name: `📹 ${f.height}p | ${f.ext} | ${formatSize(f)}`,
+		value: f.format_id,
+	}));
+
+	const audioFormats = info.formats.filter(
+		(f: any) => f.vcodec === 'none' && f.acodec !== 'none',
 	);
 
-	try {
-		// Download based on platform
-		switch (platform) {
-			case 'youtube':
-				await downloadYouTubeVideo(url, tempFilePath);
-				break;
-			case 'tiktok':
-				await downloadTikTokVideo(url, tempFilePath);
-				break;
-			case 'instagram':
-				await downloadInstagramVideo(url, tempFilePath);
-				break;
-			default:
-				throw new Error(`Unsupported platform: ${platform}`);
-		}
+	const audioChoices = audioFormats.map((f: any) => ({
+		name: `🎵 Audio | ${f.ext} | ${f.abr || f.asr || 'N/A'} kbps | ${formatSize(
+			f,
+		)}`,
+		value: f.format_id,
+	}));
 
-		// Process the video to desired format and quality
-		await processVideo(tempFilePath, outputFilePath, format, quality);
+	const choices = [
+		new inquirer.Separator('=== Video Formats ==='),
+		...videoChoices,
+		new inquirer.Separator('=== Audio Formats ==='),
+		...audioChoices,
+	];
 
-		// Clean up the temporary file
-		await fs.remove(tempFilePath);
+	const { selectedFormat } = await inquirer.prompt([
+		{
+			type: 'list',
+			name: 'selectedFormat',
+			message: 'Select format to download:',
+			choices,
+		},
+	]);
 
-		return outputFilePath;
-	} catch (error) {
-		// Clean up on error
-		if (await fs.pathExists(tempFilePath)) {
-			await fs.remove(tempFilePath);
-		}
-		throw error;
+	const outputPath = path.join(
+		downloadsDir,
+		`${videoTitle} - %(format_id)s.%(ext)s`,
+	);
+	console.log('\n⏬ Starting download...\n');
+
+	let args: string[];
+	if (url.includes('tiktok.com')) {
+		args = ['-f', selectedFormat, '-o', outputPath, '--newline', url];
+	} else {
+		args = [
+			'-f',
+			`${selectedFormat}+bestaudio[ext=m4a]/bestaudio`,
+			'-o',
+			outputPath,
+			'--merge-output-format',
+			'mp4',
+			'--newline',
+			url,
+		];
 	}
-}
 
-async function downloadYouTubeVideo(
-	url: string,
-	outputPath: string,
-): Promise<void> {
-	try {
-		await youtubeDl(url, {
-			output: outputPath,
-			format: 'bestvideo[height<=720]+bestaudio/best[height<=720]',
-			mergeOutputFormat: 'mp4',
-			noCheckCertificates: true,
-			noWarnings: true,
-			preferFreeFormats: true,
-			addHeader: [
-				'referer:youtube.com',
-				'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-			],
-		});
-		return Promise.resolve();
-	} catch (error) {
-		console.error('YouTube download error:', error);
-		return Promise.reject(new Error('Failed to download YouTube video'));
-	}
-}
+	const proc = spawn('yt-dlp', args);
 
-async function downloadTikTokVideo(
-	url: string,
-	outputPath: string,
-): Promise<void> {
-	// This is a simplified example - TikTok would require more complex handling
-	try {
-		// First we would need to extract the actual video URL by parsing the page
-		const response = await axios.get(url);
-		const $ = cheerio.load(response.data);
-
-		// This is a placeholder - actual extraction would be more complex
-		// and would require finding the video URL in the page source
-		const videoUrl = $('video source').attr('src');
-
-		if (!videoUrl) {
-			throw new Error('Could not find video URL on TikTok page');
+	proc.stdout.on('data', (data) => {
+		const line = data.toString();
+		const match = line.match(
+			/\[download\]\s+(\d+\.\d+)%\s+of\s+([\d.]+\w+)\s+at\s+([\d.]+\w+\/s)\s+ETA\s+(\d+:\d+)/,
+		);
+		if (match) {
+			const [, percent, totalSize, speed, eta] = match;
+			process.stdout.clearLine(0);
+			process.stdout.cursorTo(0);
+			process.stdout.write(
+				`📥 ${percent}% of ${totalSize} at ${speed} | ETA: ${eta}`,
+			);
+		} else if (line.includes('Destination:')) {
+			console.log('\n🎯 ' + line.trim());
 		}
+	});
 
-		// Download the video
-		const videoResponse = await axios({
-			method: 'GET',
-			url: videoUrl,
-			responseType: 'stream',
+	proc.stderr.on('data', (data) => {
+		console.error(data.toString());
+	});
+
+	await new Promise((resolve, reject) => {
+		proc.on('close', (code) => {
+			if (code === 0) {
+				console.log('\n✅ Download completed!\n');
+				resolve(null);
+			} else {
+				reject('Download failed.');
+			}
 		});
-
-		const writer = fs.createWriteStream(outputPath);
-		videoResponse.data.pipe(writer);
-
-		return new Promise((resolve, reject) => {
-			writer.on('finish', resolve);
-			writer.on('error', reject);
-		});
-	} catch (error) {
-		console.error('TikTok download error:', error);
-		throw new Error('Failed to download TikTok video');
-	}
-}
-
-async function downloadInstagramVideo(
-	url: string,
-	outputPath: string,
-): Promise<void> {
-	// Similar to TikTok, this is a simplified example
-	try {
-		const response = await axios.get(url);
-		const $ = cheerio.load(response.data);
-
-		// This is a placeholder - actual extraction would need to handle Instagram's structure
-		const videoUrl = $('meta[property="og:video"]').attr('content');
-
-		if (!videoUrl) {
-			throw new Error('Could not find video URL on Instagram page');
-		}
-
-		// Download the video
-		const videoResponse = await axios({
-			method: 'GET',
-			url: videoUrl,
-			responseType: 'stream',
-		});
-
-		const writer = fs.createWriteStream(outputPath);
-		videoResponse.data.pipe(writer);
-
-		return new Promise((resolve, reject) => {
-			writer.on('finish', resolve);
-			writer.on('error', reject);
-		});
-	} catch (error) {
-		console.error('Instagram download error:', error);
-		throw new Error('Failed to download Instagram video');
-	}
+	});
 }
