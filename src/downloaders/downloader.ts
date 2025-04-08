@@ -130,7 +130,18 @@ export async function downloadVideo(url: string): Promise<void> {
 
 	let args: string[];
 	if (url.includes('tiktok.com')) {
-		args = ['-f', selectedFormat, '-o', outputPath, '--newline', url];
+		// args = ['-f', selectedFormat, '-o', outputPath, '--newline', url];
+		args = [
+			'--socket-timeout',
+			'60',
+			'--no-check-certificates',
+			'-f',
+			selectedFormat,
+			'-o',
+			outputPath,
+			'--newline',
+			url,
+		];
 	} else {
 		args = [
 			'-f',
