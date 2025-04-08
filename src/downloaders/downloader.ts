@@ -46,30 +46,47 @@ export async function downloadVideo(url: string): Promise<void> {
 	spinner.succeed(`✅ Formats fetched in ${seconds}s`);
 
 	const info = JSON.parse(formatsJson);
-	// console.log('Video Info:=================>>>>>', info);
 	const videoTitle = info.title.replace(/[\/\\:*?"<>|]/g, '');
 
-	// Popular video formats
-	const videoFormatMap: { [height: number]: any } = {};
+	if (info.is_live) {
+		console.log(
+			'❗ This video is live. Downloading live videos is not supported.',
+		);
+		return;
+	}
+	if (info.is_playlist) {
+		console.log('❗ This is a playlist. Please provide a single video URL.');
+		return;
+	}
 
-	for (const res of TARGET_RESOLUTIONS) {
-		const preferred = info.formats
-			.filter((f: any) => f.filesize && f.ext && f.format_id)
-			.find(
-				(f: any) =>
-					f.height === res &&
-					(f.ext === 'mp4' || f.ext === 'webm') &&
-					f.vcodec !== 'none',
-			);
+	let videoFormatMap: { [height: number]: any } = {};
 
-		const fallback = info.formats
-			.filter((f: any) => f.filesize && f.ext && f.format_id)
-			.find((f: any) => f.vcodec !== 'none');
+	if (url.includes('instagram.com')) {
+		const formats = info.formats;
+		for (let i = 0; i < formats.length; i++) {
+			const f = formats[i];
+			videoFormatMap[i] = f;
+		}
+	} else {
+		for (const res of TARGET_RESOLUTIONS) {
+			const preferred = info.formats
+				.filter((f: any) => f.filesize && f.ext && f.format_id)
+				.find(
+					(f: any) =>
+						f.height === res &&
+						(f.ext === 'mp4' || f.ext === 'webm') &&
+						f.vcodec !== 'none',
+				);
 
-		if (preferred) {
-			videoFormatMap[res] = preferred;
-		} else if (fallback) {
-			videoFormatMap[fallback.height] = fallback;
+			const fallback = info.formats
+				.filter((f: any) => f.filesize && f.ext && f.format_id)
+				.find((f: any) => f.vcodec !== 'none');
+
+			if (preferred) {
+				videoFormatMap[res] = preferred;
+			} else if (fallback) {
+				videoFormatMap[fallback.height] = fallback;
+			}
 		}
 	}
 
