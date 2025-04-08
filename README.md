@@ -7,6 +7,7 @@ A Node.js application built with TypeScript that can download videos from variou
 - Node.js (>=14.x)
 - Yarn (>=2.x)
 - FFmpeg installed on your system
+- yt-dlp installed on your system
 
 ## Installation
 
@@ -25,12 +26,12 @@ yarn build
 
 ### Run the downloader:
 ```
-yarn start <social-media-url> [format] [quality]
+yarn start <social-media-url>
 ```
 
 Example:
 ```
-yarn start https://www.youtube.com/watch?v=dQw4w9WgXcQ mp4 720p
+yarn start https://www.youtube.com/watch?v=dQw4w9WgXcQ
 ```
 
 ### Supported platforms:
@@ -65,5 +66,4 @@ yarn dev <social-media-url> [format] [quality]
 ## Notes
 
 - This is a basic implementation and may require updates as social media platforms change their structures.
-- Some platforms may have anti-scraping measures that could prevent downloads.
 - Always respect copyright and terms of service when downloading content.
